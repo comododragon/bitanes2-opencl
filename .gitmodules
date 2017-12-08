@@ -1,0 +1,3 @@
+[submodule "include/common"]
+	path = include/common
+	url = https://github.com/comododragon/commonh
