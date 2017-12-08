@@ -10,6 +10,7 @@ endif
 cpu/execute: include/common/common.h include/brandes.h src/brandes.cl src/host.c obj/graph.o
 	mkdir -p cpu
 	cd cpu; ln -sf ../src/brandes.cl brandes.cl
+	cd cpu; ln -sf ../include/brandes.h brandes.h
 	$(CC) src/host.c obj/graph.o -o cpu/execute -DTARGET_CPU $(FPFLAG) $(GENERALFLAGS) -lOpenCL
 
 fpga/emu/emulate: include/common/common.h include/brandes.h src/host.c obj/graph.o fpga/emu/program.aocx

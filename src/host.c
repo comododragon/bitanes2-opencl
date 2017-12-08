@@ -12,8 +12,10 @@
 
 #if double == FP_T
 #define FP_T_PRINTF_STRING "%lf"
+#define FP_T_BUILD_STRING "-DFP_T=double"
 #else
 #define FP_T_PRINTF_STRING "%f"
+#define FP_T_BUILD_STRING "-DFP_T=float"
 #endif
 
 /**
@@ -99,12 +101,12 @@ int main(int argc, char *argv[]) {
 	cl_int programRet;
 	cl_program program = NULL;
 	cl_kernel kernelBrandesLoop = NULL;
-	cl_mem adjListK;
-	cl_mem adjOffsetsK;
-	cl_mem listSMemK;
-	cl_mem listQMemK;
-	cl_mem listsPMemK;
-	cl_mem cbK;
+	cl_mem adjListK = NULL;
+	cl_mem adjOffsetsK = NULL;
+	cl_mem listSMemK = NULL;
+	cl_mem listQMemK = NULL;
+	cl_mem listsPMemK = NULL;
+	cl_mem cbK = NULL;
 	cl_uint workDim = 1;
 	size_t globalSize[1] = {1};
 
@@ -137,9 +139,9 @@ int main(int argc, char *argv[]) {
 	compactGraph = graph_compact(graph, &compactGraphOffsets);
 	compactGraphOffsets = realloc(compactGraphOffsets, np * sizeof(int));
 	compactGraphOffsets[n] = 2 * m;
-	cb = calloc(n * globalSize[0], sizeof(FP_T));
+	cb = malloc(n * globalSize[0] * sizeof(FP_T));
 #ifdef TARGET_CPU
-	cbReduced = calloc(n, sizeof(FP_T));
+	cbReduced = malloc(n * sizeof(FP_T));
 	chunkSize = n / globalSize[0];
 	chunkSizeRem = n % globalSize[0];
 #endif
@@ -206,6 +208,12 @@ int main(int argc, char *argv[]) {
 	program = clCreateProgramWithSource(context, 1, (const char **) &programContent, &programSz, &fRet);
 	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clCreateProgramWithSource"));
 	PRINT_SUCCESS();
+
+	/* Build program */
+	PRINT_STEP("Building program...");
+	fRet = clBuildProgram(program, 1, devices, FP_T_BUILD_STRING " -DTARGET_CPU", NULL, NULL);
+	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clBuildProgram"));
+	PRINT_SUCCESS();
 #else
 	/* Create program from binary file */
 	PRINT_STEP("Creating program from binary...");
@@ -213,13 +221,13 @@ int main(int argc, char *argv[]) {
 	ASSERT_CALL(CL_SUCCESS == programRet, FUNCTION_ERROR_STATEMENTS("clCreateProgramWithBinary (when loading binary)"));
 	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clCreateProgramWithBinary"));
 	PRINT_SUCCESS();
-#endif
 
 	/* Build program */
 	PRINT_STEP("Building program...");
 	fRet = clBuildProgram(program, 1, devices, NULL, NULL, NULL);
 	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clBuildProgram"));
 	PRINT_SUCCESS();
+#endif
 
 	/* Create kernelBrandesLoop */
 	PRINT_STEP("Creating kernel \"brandesLoop\" from program...");
@@ -239,7 +247,7 @@ int main(int argc, char *argv[]) {
 	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clCreateBuffer (listQMemK)"));
 	listsPMemK = clCreateBuffer(context, CL_MEM_WRITE_ONLY,  LISTS_P_MAX_SIZE * sizeof(int), NULL, &fRet);
 	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clCreateBuffer (listsPMemK)"));
-	cbK = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,  n * globalSize[0] * sizeof(FP_T), cb, &fRet);
+	cbK = clCreateBuffer(context, CL_MEM_READ_WRITE,  n * globalSize[0] * sizeof(FP_T), NULL, &fRet);
 	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clCreateBuffer (cbK)"));
 	PRINT_SUCCESS();
 
@@ -287,22 +295,36 @@ int main(int argc, char *argv[]) {
 
 	/* Get output buffers */
 	PRINT_STEP("Getting kernel arguments...");
-	fRet = clEnqueueReadBuffer(queueBrandesLoop, cbK, CL_TRUE, 0, globalSize[0] * n * sizeof(FP_T), cb, 0, NULL, NULL);
+	fRet = clEnqueueReadBuffer(queueBrandesLoop, cbK, CL_TRUE, 0, n * globalSize[0] * sizeof(FP_T), cb, 0, NULL, NULL);
 	ASSERT_CALL(CL_SUCCESS == fRet, FUNCTION_ERROR_STATEMENTS("clEnqueueReadBuffer"));
 	PRINT_SUCCESS();
 
 #ifdef TARGET_CPU
 	for(i = 0; i < n; i++) {
+		cbReduced[i] = 0;
 		for(j = 0; j < globalSize[0]; j++)
 			cbReduced[i] += cb[i + (j * n)];
-		printf("cb[%d] = " FP_T_PRINTF_STRING "\n", i, cbReduced[i] / 2);
+		printf("cb[%d] = " FP_T_PRINTF_STRING "\n", i, cbReduced[i] / 2.0);
 	}
 #else
 	for(i = 0; i < n; i++)
-		printf("cb[%d] = " FP_T_PRINTF_STRING "\n", i, cb[i] / 2);
+		printf("cb[%d] = " FP_T_PRINTF_STRING "\n", i, cb[i] / 2.0);
 #endif
 
 _err:
+	/* Print build log if build failed */
+	if((rv != EXIT_SUCCESS) && program && devices) {
+		size_t buildLogLen;
+		char *buildLog;
+
+		clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &buildLogLen);
+		buildLog = malloc(buildLogLen);
+		clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, buildLogLen, buildLog, NULL);
+
+		printf("Build output:\n%s", buildLog);
+
+		free(buildLog);
+	}
 
 	/* Dealloc buffers */
 	if(cbK)

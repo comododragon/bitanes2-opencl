@@ -71,7 +71,7 @@ __kernel void brandesLoop(
 	__global FP_T * restrict cb
 #ifdef TARGET_CPU
 	,
-	unsigned short chunkSize, unsigned short chunkSizeRem
+	unsigned int chunkSize, unsigned int chunkSizeRem
 #endif
 ) {
 	//__local int listSMem[LIST_MAX_SIZE + 1];
@@ -88,7 +88,7 @@ __kernel void brandesLoop(
 
 #ifdef TARGET_CPU
 	unsigned int gid = get_global_id(0);
-	unsigned short chunkStart, chunkStop;
+	unsigned int chunkStart, chunkStop;
 
 	if(gid < chunkSizeRem) {
 		chunkStart = gid * (chunkSize + 1);
@@ -98,6 +98,14 @@ __kernel void brandesLoop(
 		chunkStart = (gid * chunkSize) + chunkSizeRem;
 		chunkStop = chunkStart + chunkSize;
 	}
+#endif
+
+#ifdef TARGET_CPU
+	for(i = 0; i < graphSize; i++)
+		cb[i + (graphSize * gid)] = 0;
+#else
+	for(i = 0; i < graphSize; i++)
+		cb[i] = 0;
 #endif
 	
 //#pragma unroll 2
@@ -162,7 +170,7 @@ __kernel void brandesLoop(
 
 			if(w != s) {
 #ifdef TARGET_CPU
-				cb[w + (graphSize * gid)] += delta[w + (graphSize * gid)];
+				cb[w + (graphSize * gid)] += delta[w];
 #else
 				cb[w] += delta[w];
 #endif
